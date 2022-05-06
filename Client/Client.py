@@ -3,6 +3,7 @@ import sys
 from PySide6.QtCore import QFile, QIODevice, Slot
 from PySide6.QtUiTools import QUiLoader
 from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtCharts import QChart, QChartView
 
 from PySide6.QtBluetooth import \
     QBluetoothAddress, \
@@ -24,9 +25,8 @@ class SemgClient(QWidget):
         self.setWindowTitle('表面肌电手势识别 - 客户端')
 
         # Initialize bluetooth utils.
-        self.device_agent = QBluetoothDeviceDiscoveryAgent()
         self.local_device = QBluetoothLocalDevice()
-        self.socket = QBluetoothSocket()
+        self.device_agent = QBluetoothDeviceDiscoveryAgent()
         self.service_agent = QBluetoothServiceDiscoveryAgent()
 
         # Connect signals & slots
@@ -34,16 +34,26 @@ class SemgClient(QWidget):
         self.ui.stopButton.clicked.connect(self.stopConnection)
         self.ui.deviceList.currentTextChanged.connect(self.startConnection)
         self.ui.serviceList.currentIndexChanged.connect(self.requestService)
+        
         self.device_agent.deviceDiscovered.connect(self.addDevice)
         self.local_device.pairingFinished.connect(self.pairingDone)
-        self.socket.connected.connect(self.requestDone)
-        self.socket.errorOccurred.connect(self.requestFailed)
         self.service_agent.serviceDiscovered.connect(self.addService)
 
-        # Store a temporary service UUID list for the socke to connect.
+        # Maintain a temporary service list for the socke to connect.
         self.service_list = list()
 
+        # Stop the connection manually can cause the service callback fails,
+        # but this user operation should not be displayed in the hint label.
+        # The connection error should be shown only if this field is False.
+        self.is_connection_stopped_by_user = False
+
         self.device_agent.start()
+
+        self.chart_view = QChartView()
+        self.chart = QChart()
+        self.chart.setTitle("数据曲线")
+        self.chart_view.setChart(self.chart)
+        self.ui.signalGallery.addWidget(self.chart_view, 0, 0)
 
     def loadUI(self):
         # Search UI form definition file.
@@ -72,13 +82,13 @@ class SemgClient(QWidget):
 
     @Slot()
     def startConnection(self):
-        self.ui.startButton.setEnabled(False)
-        self.ui.stateIndicator.setText('正在连接')
         try:
+            self.ui.startButton.setEnabled(False)
+            self.ui.stateIndicator.setText('正在连接')
             # Try pair with target device.
-            tmp = self.ui.deviceList.currentText().split(' @ ')
-            if len(tmp) == 2:
-                addr = tmp[1]
+            name_addr = self.ui.deviceList.currentText().split(' @ ')
+            if len(name_addr) == 2:
+                addr = name_addr[1]
                 self.local_device.requestPairing(QBluetoothAddress(addr), QBluetoothLocalDevice.Paired)
         except Exception as e:
             print(f'Exception in startConnection, {e}')
@@ -86,10 +96,10 @@ class SemgClient(QWidget):
     @Slot()
     def stopConnection(self):
         try:
-            tmp = self.ui.deviceList.currentText().split(' @ ')
-            if len(tmp) == 2:
-                addr = tmp[1]
-                self.socket.abort()
+            self.is_connection_stopped_by_user = True
+            name_addr = self.ui.deviceList.currentText().split(' @ ')
+            if len(name_addr) == 2:
+                addr = name_addr[1]
                 self.local_device.requestPairing(QBluetoothAddress(addr), QBluetoothLocalDevice.Unpaired)
         except Exception as e:
             print(f'Exception in stopConnection, {e}')
@@ -123,7 +133,10 @@ class SemgClient(QWidget):
     def requestService(self, index):
         try:
             if index >= 0 and index < len(self.service_list):
-                self.socket.abort()
+                self.socket = QBluetoothSocket(QBluetoothServiceInfo.RfcommProtocol)
+                self.socket.connected.connect(self.requestDone)
+                self.socket.errorOccurred.connect(self.requestFailed)
+                self.socket.readyRead.connect(self.readDeviceData)
                 self.socket.connectToService(self.service_list[index])
         except Exception as e:
             print(f'Exception in requestService, {e}')
@@ -134,7 +147,14 @@ class SemgClient(QWidget):
 
     @Slot()
     def requestFailed(self):
-        self.ui.stateIndicator.setText('请求服务失败')
+        if not self.is_connection_stopped_by_user:
+            self.ui.stateIndicator.setText('连接请求服务失败')
+
+    @Slot()
+    def readDeviceData(self):
+        if (self.socket.isReadable()):
+            data = self.socket.read(1024)
+            self.ui.recogResultLabel.setText(data.toStdString())
 
 
 if __name__ == "__main__":

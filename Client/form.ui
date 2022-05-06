@@ -36,7 +36,7 @@
      <number>12</number>
     </property>
     <item>
-     <widget class="QListView" name="semgSignalList"/>
+     <layout class="QGridLayout" name="signalGallery"/>
     </item>
     <item>
      <widget class="QLabel" name="recogResultLabel">
