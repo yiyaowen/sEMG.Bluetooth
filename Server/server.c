@@ -1,8 +1,5 @@
 #include <MKL25Z4.h>
 
-#include <FreeRTOS.h>
-#include <task.h>
-
 // ADC
 
 #define ADC_CHANNEL_1_PTC (0x01) // PTC1
@@ -32,7 +29,7 @@ void InitAdc(void);
 
 // R: Result.
 // The sampling result will be stored into Rn register.
-#define ADC_INPUT_VALUE (ADC0->R[0])
+#define ADC_INPUT_VALUE ((uint16_t)ADC0->R[0])
 
 // UART
 
@@ -46,10 +43,65 @@ void InitUart(void);
 #define UART_WRITABLE (UART0->S1 & 0x80)
 #define UART_READABLE (UART0->S1 & 0x20)
 
+#define UART_IO_VALUE (UART0->D)
+
 int main(void)
 {
-    vTaskStartScheduler();
-    for ( ;; ) ;
+    InitAdc();
+    InitUart();
+    
+    volatile int input_ptr, output_ptr;
+    volatile int byte_writen;
+    
+    // The device [KL25Z128VLK4]'s SRAM is total 16kB available
+    // and the stack depth is set to 8kB i.e. 8192 bytes in startup,
+    // so allocate 2048 16-bit sampling values i.e. 4096 bytes here.
+    uint8_t data_buffer[4096];
+    
+    // ptr's range: 0 ~ 2047.
+    input_ptr = output_ptr = 0;
+    byte_writen = 0;
+    
+    for ( ;; )
+    {
+        // Get sampling input.
+        if (input_ptr + 1 != output_ptr)
+        {
+            SELECT_ADC_INPUT(1);
+            
+            // Little-endian, low-byte followed by high-byte.
+            data_buffer[2 * input_ptr] = ADC_INPUT_VALUE & 0x0FF;
+            data_buffer[2 * input_ptr + 1] = (ADC_INPUT_VALUE >> 8) & 0x0FF;
+            
+            if (++input_ptr > 2047)
+            {
+                input_ptr = 0;
+            }
+        }
+        // Send to remote device.
+        while (UART_WRITABLE && (output_ptr + 1 != input_ptr))
+        {
+            if (UART_WRITABLE && byte_writen == 0)
+            {
+                ++byte_writen;
+                UART_IO_VALUE = data_buffer[2 * output_ptr];
+            }
+            if (UART_WRITABLE && byte_writen == 1)
+            {
+                ++byte_writen;
+                UART_IO_VALUE = data_buffer[2 * output_ptr + 1];
+            }
+            
+            if (byte_writen == 2)
+            {
+                byte_writen = 0;
+                if (++output_ptr > 2047)
+                {
+                    output_ptr = 0;
+                }
+            }
+        }
+    }
 }
 
 void InitAdc(void)

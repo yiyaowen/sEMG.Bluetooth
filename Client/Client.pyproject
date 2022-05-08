@@ -1,3 +1,3 @@
 {
-    "files": ["Client.py", "form.ui"]
+    "files": ["Client.py","BluetoothClient.ui","form.ui","VisualClient.ui"]
 }
