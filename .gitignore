@@ -1,1 +1,8 @@
 *.user
+*.scvd
+*.uvguix.*
+
+Client/data.txt
+
+Server/Listings
+Server/Objects

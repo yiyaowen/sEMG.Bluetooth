@@ -64,9 +64,24 @@ int main(void)
     
     __enable_irq();
     
-    StartPit(0);
+wait_for_client:
+    while (!UART_READABLE) ;
+    // Client says it's show time.
+    if (UART_IO_VALUE == 1)
+    {
+        StartPit(0);
+    }
+    else goto wait_for_client;
     
-    while (1) __WFI();
+    while (1)
+    {
+        if (UART_READABLE)
+        {
+            if (UART_IO_VALUE == 1) StartPit(0);
+            else if (UART_IO_VALUE == 2) StopPit(0);
+        }
+        __WFI();
+    }
 }
 
 void PIT_IRQHandler(void)

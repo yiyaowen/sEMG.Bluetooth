@@ -25,9 +25,6 @@ from PySide6.QtBluetooth import \
     QBluetoothServiceInfo
 
 
-from PySide6.QtCore import QTimer
-from random import random
-
 def loadUI(ui_file_name):
     ui_file = QFile(ui_file_name)
     if not ui_file.open(QIODevice.ReadOnly):
@@ -83,6 +80,13 @@ class BluetoothClient(QWidget):
 
         self.device_agent.start()
 
+    def __del__(self):
+        super().__del__()
+        # TODO: fix 1st-received-error-byte bug.
+        # Notify the server to stop sampling.
+        self.socket.write(b'\x02')
+        self.socket.readAll()
+
     @Slot(QBluetoothDeviceInfo)
     def addDevice(self, info):
         addr = info.address().toString()
@@ -106,6 +110,10 @@ class BluetoothClient(QWidget):
     @Slot()
     def stopConnection(self):
         try:
+            # TODO: fix 1st-received-error-byte bug.
+            # Notify the server to stop sampling.
+            self.socket.write(b'\x02')
+            self.socket.readAll()
             self.is_connection_stopped_by_user = True
             name_addr = self.ui.deviceList.currentText().split(' @ ')
             if len(name_addr) == 2:
@@ -153,7 +161,14 @@ class BluetoothClient(QWidget):
 
     @Slot()
     def requestDone(self):
-        self.ui.stateIndicator.setText('设备已就绪')
+        try:
+            # TODO: fix 1st-received-error-byte bug.
+            # Notify the server to send sampling data.
+            self.socket.readAll()
+            self.socket.write(b'\x01')
+            self.ui.stateIndicator.setText('设备已就绪')
+        except Exception as e:
+            print(f'Exception in requestDone, {e}')
 
     @Slot()
     def requestFailed(self):
