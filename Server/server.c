@@ -66,23 +66,23 @@ int main(void)
     
     StartPit(0);
     
-	while (1) __WFI();
+    while (1) __WFI();
 }
 
 void PIT_IRQHandler(void)
 {
-	NVIC_ClearPendingIRQ(PIT_IRQn);
-	
-	// Check which channel is triggered. (0 or 1)
-	// TFLG: Timer Flag
-	if (PIT->CHANNEL[0].TFLG & PIT_TFLG_TIF_MASK)
-	{
-		// If triggered, clear the interrupt flag immediately.
-		/************************************************/
-		/* NOTE: write '1' into flag register to CLEAR! */
-		/************************************************/
-		PIT->CHANNEL[0].TFLG &= PIT_TFLG_TIF_MASK;
-		
+    NVIC_ClearPendingIRQ(PIT_IRQn);
+
+    // Check which channel is triggered. (0 or 1)
+    // TFLG: Timer Flag
+    if (PIT->CHANNEL[0].TFLG & PIT_TFLG_TIF_MASK)
+    {
+        // If triggered, clear the interrupt flag immediately.
+        /************************************************/
+        /* NOTE: write '1' into flag register to CLEAR! */
+        /************************************************/
+        PIT->CHANNEL[0].TFLG &= PIT_TFLG_TIF_MASK;
+        
         // User defined works.
         SELECT_ADC_INPUT(1);
         while (!UART_WRITABLE) ;
@@ -90,56 +90,56 @@ void PIT_IRQHandler(void)
         while (!UART_WRITABLE) ;
         UART_IO_VALUE = (ADC_INPUT_VALUE >> 8) & 0x0FF;
     }
-//	else if (PIT->CHANNEL[1].TFLG & PIT_TFLG_TIF_MASK)
-//	{
-//		PIT->CHANNEL[1].TFLG &= PIT_TFLG_TIF_MASK;
-//	}
+//  else if (PIT->CHANNEL[1].TFLG & PIT_TFLG_TIF_MASK)
+//  {
+//      PIT->CHANNEL[1].TFLG &= PIT_TFLG_TIF_MASK;
+//  }
 }
 
 void InitPit(int channel)
 {
     // Enable clock to PIT module.
-	SIM->SCGC6 |= SIM_SCGC6_PIT_MASK;
-	
-	// Freeze timer in debug mode.
-	// MCR: Module Control Register
-	// MDIS: Module Disable
-	// FRZ: Freeze
-	// 'Disable' module disable bit. (write 0 to enable)
-	PIT->MCR &= ~PIT_MCR_MDIS_MASK;
-	// Allows the timers to be stopped when the device enters the Debug mode.
-	PIT->MCR |= PIT_MCR_FRZ_MASK;
-	
-	// Init PIT0 to countdown from argument.
-	// LDVAL: Load Value
-	// TSV: Timer Start Value
-	PIT->CHANNEL[channel].LDVAL = PIT_LDVAL_TSV(BUS_CLOCK_FREQ / TIMER_FREQ);
-	
-	// Disable chaining.
-	// TCTRL: 
-	// CHN: Chaining
-	PIT->CHANNEL[channel].TCTRL &= PIT_TCTRL_CHN_MASK;
-	
-	// Enable interrupt.
-	// TIE: Timer Interrupt Enable
-	PIT->CHANNEL[channel].TCTRL |= PIT_TCTRL_TIE_MASK;
-	
-	// NVIC: Nested Vectored Interrupt Controller
-	// IRQ: Interrupt ReQuest, IRQn means IRQ code.
-	NVIC_SetPriority(PIT_IRQn, 128); // 0, 64, 128 or 192
-	NVIC_ClearPendingIRQ(PIT_IRQn);
-	NVIC_EnableIRQ(PIT_IRQn);
+    SIM->SCGC6 |= SIM_SCGC6_PIT_MASK;
+
+    // Freeze timer in debug mode.
+    // MCR: Module Control Register
+    // MDIS: Module Disable
+    // FRZ: Freeze
+    // 'Disable' module disable bit. (write 0 to enable)
+    PIT->MCR &= ~PIT_MCR_MDIS_MASK;
+    // Allows the timers to be stopped when the device enters the Debug mode.
+    PIT->MCR |= PIT_MCR_FRZ_MASK;
+
+    // Init PIT0 to countdown from argument.
+    // LDVAL: Load Value
+    // TSV: Timer Start Value
+    PIT->CHANNEL[channel].LDVAL = PIT_LDVAL_TSV(BUS_CLOCK_FREQ / TIMER_FREQ);
+
+    // Disable chaining.
+    // TCTRL: 
+    // CHN: Chaining
+    PIT->CHANNEL[channel].TCTRL &= PIT_TCTRL_CHN_MASK;
+
+    // Enable interrupt.
+    // TIE: Timer Interrupt Enable
+    PIT->CHANNEL[channel].TCTRL |= PIT_TCTRL_TIE_MASK;
+
+    // NVIC: Nested Vectored Interrupt Controller
+    // IRQ: Interrupt ReQuest, IRQn means IRQ code.
+    NVIC_SetPriority(PIT_IRQn, 128); // 0, 64, 128 or 192
+    NVIC_ClearPendingIRQ(PIT_IRQn);
+    NVIC_EnableIRQ(PIT_IRQn);
 }
 
 void StartPit(int channel)
 {
-	// TEN: Timer Enable
-	PIT->CHANNEL[channel].TCTRL |= PIT_TCTRL_TEN_MASK;
+    // TEN: Timer Enable
+    PIT->CHANNEL[channel].TCTRL |= PIT_TCTRL_TEN_MASK;
 }
 
 void StopPit(int channel)
 {
-	PIT->CHANNEL[channel].TCTRL &= ~PIT_TCTRL_TEN_MASK;
+    PIT->CHANNEL[channel].TCTRL &= ~PIT_TCTRL_TEN_MASK;
 }
 
 void InitAdc(void)
