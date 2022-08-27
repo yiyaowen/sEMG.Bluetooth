@@ -83,7 +83,7 @@ void PIT_IRQHandler(void)
 		/************************************************/
 		PIT->CHANNEL[0].TFLG &= PIT_TFLG_TIF_MASK;
 		
-		// User defined works.
+        // User defined works.
         SELECT_ADC_INPUT(1);
         while (!UART_WRITABLE) ;
         UART_IO_VALUE = ADC_INPUT_VALUE & 0x0FF;
