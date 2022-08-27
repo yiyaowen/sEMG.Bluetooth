@@ -1,5 +1,16 @@
 #include <MKL25Z4.h>
 
+// PIT
+
+#define BUS_CLOCK_FREQ (20971520) // 20.97152 MHz
+
+#define TIMER_FREQ (500) // User defined, 500 Hz
+
+void InitPit(int channel);
+
+void StartPit(int channel);
+void StopPit(int channel);
+
 // ADC
 
 #define ADC_CHANNEL_1_PTC (0x01) // PTC1
@@ -47,61 +58,88 @@ void InitUart(void);
 
 int main(void)
 {
+    InitPit(0);
     InitAdc();
     InitUart();
     
-    volatile int input_ptr, output_ptr;
-    volatile int byte_writen;
+    __enable_irq();
     
-    // The device [KL25Z128VLK4]'s SRAM is total 16kB available
-    // and the stack depth is set to 8kB i.e. 8192 bytes in startup,
-    // so allocate 2048 16-bit sampling values i.e. 4096 bytes here.
-    uint8_t data_buffer[4096];
+    StartPit(0);
     
-    // ptr's range: 0 ~ 2047.
-    input_ptr = output_ptr = 0;
-    byte_writen = 0;
-    
-    for ( ;; )
-    {
-        // Get sampling input.
-        if (input_ptr + 1 != output_ptr)
-        {
-            SELECT_ADC_INPUT(1);
-            
-            // Little-endian, low-byte followed by high-byte.
-            data_buffer[2 * input_ptr] = ADC_INPUT_VALUE & 0x0FF;
-            data_buffer[2 * input_ptr + 1] = (ADC_INPUT_VALUE >> 8) & 0x0FF;
-            
-            if (++input_ptr > 2047)
-            {
-                input_ptr = 0;
-            }
-        }
-        // Send to remote device.
-        while (UART_WRITABLE && (output_ptr + 1 != input_ptr))
-        {
-            if (UART_WRITABLE && byte_writen == 0)
-            {
-                ++byte_writen;
-                UART_IO_VALUE = data_buffer[2 * output_ptr];
-            }
-            if (UART_WRITABLE && byte_writen == 1)
-            {
-                ++byte_writen;
-                UART_IO_VALUE = data_buffer[2 * output_ptr + 1];
-            }
-            
-            if (byte_writen == 2)
-            {
-                byte_writen = 0;
-                if (++output_ptr > 2047)
-                {
-                    output_ptr = 0;
-                }
-            }
-        }
+	while (1) __WFI();
+}
+
+void PIT_IRQHandler(void)
+{
+	NVIC_ClearPendingIRQ(PIT_IRQn);
+	
+	// Check which channel is triggered. (0 or 1)
+	// TFLG: Timer Flag
+	if (PIT->CHANNEL[0].TFLG & PIT_TFLG_TIF_MASK)
+	{
+		// If triggered, clear the interrupt flag immediately.
+		/************************************************/
+		/* NOTE: write '1' into flag register to CLEAR! */
+		/************************************************/
+		PIT->CHANNEL[0].TFLG &= PIT_TFLG_TIF_MASK;
+		
+		// User defined works.
+        SELECT_ADC_INPUT(1);
+        while (!UART_WRITABLE) ;
+        UART_IO_VALUE = ADC_INPUT_VALUE & 0x0FF;
+        while (!UART_WRITABLE) ;
+        UART_IO_VALUE = (ADC_INPUT_VALUE >> 8) & 0x0FF;
     }
+//	else if (PIT->CHANNEL[1].TFLG & PIT_TFLG_TIF_MASK)
+//	{
+//		PIT->CHANNEL[1].TFLG &= PIT_TFLG_TIF_MASK;
+//	}
+}
+
+void InitPit(int channel)
+{
+    // Enable clock to PIT module.
+	SIM->SCGC6 |= SIM_SCGC6_PIT_MASK;
+	
+	// Freeze timer in debug mode.
+	// MCR: Module Control Register
+	// MDIS: Module Disable
+	// FRZ: Freeze
+	// 'Disable' module disable bit. (write 0 to enable)
+	PIT->MCR &= ~PIT_MCR_MDIS_MASK;
+	// Allows the timers to be stopped when the device enters the Debug mode.
+	PIT->MCR |= PIT_MCR_FRZ_MASK;
+	
+	// Init PIT0 to countdown from argument.
+	// LDVAL: Load Value
+	// TSV: Timer Start Value
+	PIT->CHANNEL[channel].LDVAL = PIT_LDVAL_TSV(BUS_CLOCK_FREQ / TIMER_FREQ);
+	
+	// Disable chaining.
+	// TCTRL: 
+	// CHN: Chaining
+	PIT->CHANNEL[channel].TCTRL &= PIT_TCTRL_CHN_MASK;
+	
+	// Enable interrupt.
+	// TIE: Timer Interrupt Enable
+	PIT->CHANNEL[channel].TCTRL |= PIT_TCTRL_TIE_MASK;
+	
+	// NVIC: Nested Vectored Interrupt Controller
+	// IRQ: Interrupt ReQuest, IRQn means IRQ code.
+	NVIC_SetPriority(PIT_IRQn, 128); // 0, 64, 128 or 192
+	NVIC_ClearPendingIRQ(PIT_IRQn);
+	NVIC_EnableIRQ(PIT_IRQn);
+}
+
+void StartPit(int channel)
+{
+	// TEN: Timer Enable
+	PIT->CHANNEL[channel].TCTRL |= PIT_TCTRL_TEN_MASK;
+}
+
+void StopPit(int channel)
+{
+	PIT->CHANNEL[channel].TCTRL &= ~PIT_TCTRL_TEN_MASK;
 }
 
 void InitAdc(void)

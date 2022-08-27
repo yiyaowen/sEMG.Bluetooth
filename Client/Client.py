@@ -280,12 +280,20 @@ class VisualClient(QWidget):
         except Exception as e:
             print(f'Exception in updateChart, {e}')
 
+    def saveData(self):
+        f = open('data.txt', 'w')
+        for elem in self.signal_amplitude_list:
+            f.write(str(elem) + '\n')
+        f.close()
+
 
 def visualProcess(comm_queue):
     app = QApplication(sys.argv)
     vs_clnt = VisualClient(comm_queue)
     vs_clnt.show()
-    sys.exit(app.exec())
+    rcode = app.exec()
+    vs_clnt.saveData()
+    sys.exit(rcode)
 
 
 if __name__ == '__main__':

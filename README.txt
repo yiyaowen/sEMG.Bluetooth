@@ -1,0 +1,1 @@
+TXD -- PTA1, RXD -- PTA2
