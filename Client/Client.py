@@ -231,7 +231,7 @@ class VisualClient(QWidget):
     def makeChannelChart(self):
         channel = types.SimpleNamespace()
 
-        channel.t = self.makeGeneralChart('时域', '时间', (0, 1000), 6, '幅度 / 伏特', (0, 5), 6)
+        channel.t = self.makeGeneralChart('时域', '时间', (0, 1000), 6, '幅度 / 伏特', (0, 3.3), 2)
         channel.f = self.makeGeneralChart('频域', '频率', (-250, 250), 6, '幅度 / 绝对值', (0, 1000), 2)
 
         return channel
@@ -284,7 +284,7 @@ class VisualClient(QWidget):
                     data_array = self.comm_queue.get(True, 1)
                     # Convert 16-bit sampling values to referenced voltage values.
                     for i in range(0, len(data_array)):
-                        data_array[i] = (data_array[i] / 65536) * 5
+                        data_array[i] = (data_array[i] / 65536) * 3.3
                     self.signal_amplitude_list = self.signal_amplitude_list + data_array
                     # Notify to update the chart with new data.
                     self.data_received.emit()
