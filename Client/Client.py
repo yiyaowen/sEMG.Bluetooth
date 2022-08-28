@@ -3,6 +3,9 @@ import sys
 import struct
 from threading import Thread, RLock
 import time
+import types
+
+import numpy as np
 
 from PySide6.QtCore import QByteArray, QFile, QIODevice, QPointF, Signal, Slot
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
@@ -200,7 +203,7 @@ class BluetoothClient(QWidget):
                 self.broadcastReceive(value_array) # Notify all registered processes.
         except Exception as e:
             print(f'Exception in readDeviceData, {e}')
-
+ 
 
 class VisualClient(QWidget):
 
@@ -209,10 +212,13 @@ class VisualClient(QWidget):
         self.comm_queue = comm_queue
         self.ui = loadUI('VisualClient.ui')
         self.setLayout(self.ui.signalGallery)
-        self.resize(800, 400)
+        self.resize(800, 800)
         self.setWindowTitle('表面肌电手势识别 - 可视化客户端')
 
-        self.initChart()
+        self.ui.channel = self.makeChannelChart()
+        # Setup single channel for the time being.
+        self.ui.signalGallery.addWidget(self.ui.channel.t.chartView, 0, 0)
+        self.ui.signalGallery.addWidget(self.ui.channel.f.chartView, 1, 0)
 
         self.signal_amplitude_list = list()
 
@@ -222,41 +228,49 @@ class VisualClient(QWidget):
         self.td.daemon = True
         self.td.start()
 
-    def initChart(self):
-        self.ui.series = QLineSeries()
-        self.ui.series.setName('肌电信号')
-        self.ui.series.setUseOpenGL(True)
-        self.ui.series.setPen(QPen(QColor(65, 105, 225), 1))
-        self.ui.series.replace([QPointF(x, 0) for x in range(0, 1001)])
+    def makeChannelChart(self):
+        channel = types.SimpleNamespace()
 
-        self.ui.axisX = QValueAxis()
-        self.ui.axisX.setRange(0, 1000)
-        self.ui.axisX.setTickCount(6)
-        self.ui.axisX.setTitleText('时间轴')
-        self.ui.axisX.setTitleFont(QFont('黑体', 16))
+        channel.t = self.makeGeneralChart('时域', '时间', (0, 1000), 6, '幅度 / 伏特', (0, 5), 6)
+        channel.f = self.makeGeneralChart('频域', '频率', (-250, 250), 6, '幅度 / 绝对值', (0, 1000), 2)
 
-        self.ui.axisY = QValueAxis()
-        self.ui.axisY.setRange(-10, 10)
-        self.ui.axisY.setTickCount(3)
-        self.ui.axisY.setMinorTickCount(1)
-        self.ui.axisY.setTitleText('幅度 / 伏特')
-        self.ui.axisY.setTitleFont(QFont('黑体', 16))
+        return channel
 
-        self.ui.chart = QChart()
-        self.ui.chart.setTitle("通道 1")
-        self.ui.chart.setTitleFont(QFont('黑体', 16, QFont.Bold))
-        self.ui.chart.addSeries(self.ui.series)
-        self.ui.chart.setAxisX(self.ui.axisX)
-        self.ui.chart.setAxisY(self.ui.axisY)
-        self.ui.series.attachAxis(self.ui.axisX)
-        self.ui.series.attachAxis(self.ui.axisY)
+    def makeGeneralChart(self, title, xlabel, xrange, xtick, ylabel, yrange, ytick):
+        chart = types.SimpleNamespace()
 
-        self.ui.chartView = QChartView()
-        self.ui.chartView.setChart(self.ui.chart)
-        self.ui.chartView.setRenderHint(QPainter.Antialiasing)
+        chart.series = QLineSeries()
+        chart.series.setName('肌电信号')
+        chart.series.setUseOpenGL(True)
+        chart.series.setPen(QPen(QColor(65, 105, 225), 1))
+        chart.series.replace([QPointF(x, 0) for x in range(0, 1001)])
 
-        # Setup single channel for the time being.
-        self.ui.signalGallery.addWidget(self.ui.chartView, 0, 0)
+        chart.axisX = QValueAxis()
+        chart.axisX.setRange(*xrange)
+        chart.axisX.setTickCount(xtick)
+        chart.axisX.setTitleText(xlabel)
+        chart.axisX.setTitleFont(QFont('黑体', 16))
+
+        chart.axisY = QValueAxis()
+        chart.axisY.setRange(*yrange)
+        chart.axisY.setTickCount(ytick)
+        chart.axisY.setTitleText(ylabel)
+        chart.axisY.setTitleFont(QFont('黑体', 16))
+
+        chart.chart = QChart()
+        chart.chart.setTitle(title)
+        chart.chart.setTitleFont(QFont('黑体', 16, QFont.Bold))
+        chart.chart.addSeries(chart.series)
+        chart.chart.setAxisX(chart.axisX)
+        chart.chart.setAxisY(chart.axisY)
+        chart.series.attachAxis(chart.axisX)
+        chart.series.attachAxis(chart.axisY)
+
+        chart.chartView = QChartView()
+        chart.chartView.setChart(chart.chart)
+        chart.chartView.setRenderHint(QPainter.Antialiasing)
+
+        return chart
 
     data_received = Signal()
 
@@ -282,7 +296,8 @@ class VisualClient(QWidget):
     def updateChart(self):
         try:
             self.lk.acquire()
-            point_vec = self.ui.series.pointsVector()
+            # Update time-space chart.
+            point_vec = self.ui.channel.t.series.pointsVector()
             pvec_len = len(point_vec)
             svec_len = len(self.signal_amplitude_list)
             mvec_len = min(pvec_len, svec_len)
@@ -290,7 +305,16 @@ class VisualClient(QWidget):
                 data = self.signal_amplitude_list[svec_len - i - 1]
                 point_vec[pvec_len - i - 1].setY(data)
             # Use replace instead of clear & append to improve performance.
-            self.ui.series.replace(point_vec)
+            self.ui.channel.t.series.replace(point_vec)
+            # Update freq-space chart.
+            signal_y = [p.y() for p in point_vec]
+            if len(signal_y) > 1000:
+                signal_y = signal_y[0:1000]
+            elif len(signal_y) < 1000:
+                signal_y = signal_y + [0] * (1000 - len(signal_y))
+            freq_vec = abs(np.fft.fftshift(np.fft.fft(signal_y)))
+            point_vec = [QPointF((x-500)/2, freq_vec[x]) for x in range(0, 1000)]
+            self.ui.channel.f.series.replace(point_vec)
             self.lk.release()
         except Exception as e:
             print(f'Exception in updateChart, {e}')
