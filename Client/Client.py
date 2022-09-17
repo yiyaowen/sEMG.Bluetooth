@@ -231,8 +231,8 @@ class VisualClient(QWidget):
     def makeChannelChart(self):
         channel = types.SimpleNamespace()
 
-        channel.t = self.makeGeneralChart('时域', '时间 / 采样点', (0, 1000), 6, '幅度 / 伏特', (0, 3.3), 2)
-        channel.f = self.makeGeneralChart('频域', '频率 / 赫兹', (-250, 250), 6, '幅度 / 绝对值', (0, 1000), 2)
+        channel.t = self.makeGeneralChart('时域', '时间', (0, 1000), 6, '幅度 / 伏特', (0, 3.3), 2)
+        channel.f = self.makeGeneralChart('频域', '频率', (-500, 500), 6, '幅度 / 绝对值', (0, 1000), 2)
 
         return channel
 
