@@ -322,7 +322,7 @@ class VisualClient(QWidget):
         elif len(t_domain) < 1000:
             t_domain = t_domain + [0] * (1000 - len(t_domain))
         f_domain = abs(np.fft.fftshift(np.fft.fft(t_domain)))
-        point_vec = [QPointF((x-500)/2, f_domain[x]) for x in range(0, 1000)]
+        point_vec = [QPointF(x-500, f_domain[x]) for x in range(0, 1000)]
         # Use replace instead of clear & append to improve performance.
         self.ui.channel.f.series.replace(point_vec)
 
