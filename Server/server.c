@@ -4,7 +4,7 @@
 
 #define BUS_CLOCK_FREQ (20971520) // 20.97152 MHz
 
-#define TIMER_FREQ (500) // User defined, 500 Hz
+#define TIMER_FREQ (1000) // User defined < 6 kHz
 
 void InitPit(int channel);
 
@@ -47,7 +47,7 @@ void InitAdc(void);
 #define UART_RX_PTA (1)
 #define UART_TX_PTA (2)
 
-#define UART_BAUD_RATE (9600)
+#define UART_BAUD_RATE (115200)
 
 void InitUart(void);
 

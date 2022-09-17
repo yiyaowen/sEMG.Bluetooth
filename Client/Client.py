@@ -232,7 +232,7 @@ class VisualClient(QWidget):
         channel = types.SimpleNamespace()
 
         channel.t = self.makeGeneralChart('时域', '时间', (0, 1000), 6, '幅度 / 伏特', (0, 3.3), 2)
-        channel.f = self.makeGeneralChart('频域', '频率', (-250, 250), 6, '幅度 / 绝对值', (0, 1000), 2)
+        channel.f = self.makeGeneralChart('频域', '频率', (-500, 500), 6, '幅度 / 绝对值', (0, 1000), 2)
 
         return channel
 
@@ -313,7 +313,7 @@ class VisualClient(QWidget):
             elif len(signal_y) < 1000:
                 signal_y = signal_y + [0] * (1000 - len(signal_y))
             freq_vec = abs(np.fft.fftshift(np.fft.fft(signal_y)))
-            point_vec = [QPointF((x-500)/2, freq_vec[x]) for x in range(0, 1000)]
+            point_vec = [QPointF(x-500, freq_vec[x]) for x in range(0, 1000)]
             self.ui.channel.f.series.replace(point_vec)
             self.lk.release()
         except Exception as e:
