@@ -289,6 +289,7 @@ class VisualClient(QWidget):
                     # Notify to update the chart with new data.
                     self.data_received.emit()
                 self.lk.release()
+                # Prevnet UI thread from getting stuck.
                 time.sleep(0.01)
         except Exception as e:
             print(f'Exception in peekCommQueue, {e}')
@@ -296,28 +297,34 @@ class VisualClient(QWidget):
     def updateChart(self):
         try:
             self.lk.acquire()
-            # Update time-space chart.
-            point_vec = self.ui.channel.t.series.pointsVector()
-            pvec_len = len(point_vec)
-            svec_len = len(self.signal_amplitude_list)
-            mvec_len = min(pvec_len, svec_len)
-            for i in range(0, mvec_len):
-                data = self.signal_amplitude_list[svec_len - i - 1]
-                point_vec[pvec_len - i - 1].setY(data)
-            # Use replace instead of clear & append to improve performance.
-            self.ui.channel.t.series.replace(point_vec)
-            # Update freq-space chart.
-            signal_y = [p.y() for p in point_vec]
-            if len(signal_y) > 1000:
-                signal_y = signal_y[0:1000]
-            elif len(signal_y) < 1000:
-                signal_y = signal_y + [0] * (1000 - len(signal_y))
-            freq_vec = abs(np.fft.fftshift(np.fft.fft(signal_y)))
-            point_vec = [QPointF(x-500, freq_vec[x]) for x in range(0, 1000)]
-            self.ui.channel.f.series.replace(point_vec)
+            self.updateTimeDomainChart()
+            self.updateFreqDomainChart()
             self.lk.release()
         except Exception as e:
             print(f'Exception in updateChart, {e}')
+
+    def updateTimeDomainChart(self):
+        point_vec = self.ui.channel.t.series.pointsVector()
+        pvec_len = len(point_vec)
+        svec_len = len(self.signal_amplitude_list)
+        mvec_len = min(pvec_len, svec_len)
+        for i in range(0, mvec_len):
+            data = self.signal_amplitude_list[svec_len - i - 1]
+            point_vec[pvec_len - i - 1].setY(data)
+        # Use replace instead of clear & append to improve performance.
+        self.ui.channel.t.series.replace(point_vec)
+
+    def updateFreqDomainChart(self):
+        point_vec = self.ui.channel.t.series.pointsVector()
+        t_domain = [p.y() for p in point_vec]
+        if len(t_domain) > 1000:
+            t_domain = t_domain[0:1000]
+        elif len(t_domain) < 1000:
+            t_domain = t_domain + [0] * (1000 - len(t_domain))
+        f_domain = abs(np.fft.fftshift(np.fft.fft(t_domain)))
+        point_vec = [QPointF((x-500)/2, f_domain[x]) for x in range(0, 1000)]
+        # Use replace instead of clear & append to improve performance.
+        self.ui.channel.f.series.replace(point_vec)
 
     def saveData(self):
         f = open('data.txt', 'w')
