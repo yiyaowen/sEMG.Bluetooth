@@ -5,8 +5,6 @@ from threading import Thread, RLock
 import time
 import types
 
-import numpy as np
-
 from PySide6.QtCore import QByteArray, QFile, QIODevice, QPointF, Signal, Slot
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtUiTools import QUiLoader
@@ -46,7 +44,9 @@ class BluetoothClient(QWidget):
 
     def __init__(self, comm_qs):
         super().__init__()
+
         self.comm_qs = comm_qs
+
         self.ui = loadUI('BluetoothClient.ui')
         self.setLayout(self.ui.mainPanel)
         self.resize(600, 200)
@@ -71,9 +71,9 @@ class BluetoothClient(QWidget):
         # Maintain a temporary service list for the socke to connect.
         self.service_list = list()
 
-        # Stop the connection manually can cause the service callback fails,
-        # but this user operation should not be displayed in the hint label.
-        # The connection error should be shown only if this field is False.
+        # Stopping the connection can cause the service callback fails,
+        # but this operation should not be displayed in the hint label.
+        # The connection error can be shown only if this field is False.
         self.is_connection_stopped_by_user = False
 
         # Store the single byte data temporarily to make a 16-bit uint later.
@@ -86,7 +86,7 @@ class BluetoothClient(QWidget):
     def __del__(self):
         super().__del__()
         # TODO: fix 1st-received-error-byte bug.
-        # Notify the server to stop sampling.
+        # Notify the server to stop the sampling.
         self.socket.write(b'\x02')
         self.socket.readAll()
 
@@ -102,7 +102,7 @@ class BluetoothClient(QWidget):
         try:
             self.ui.startButton.setEnabled(False)
             self.ui.stateIndicator.setText('正在连接')
-            # Try pair with target device.
+            # Try to pair with the target device.
             name_addr = self.ui.deviceList.currentText().split(' @ ')
             if len(name_addr) == 2:
                 addr = name_addr[1]
@@ -114,7 +114,7 @@ class BluetoothClient(QWidget):
     def stopConnection(self):
         try:
             # TODO: fix 1st-received-error-byte bug.
-            # Notify the server to stop sampling.
+            # Notify the server to stop the sampling.
             self.socket.write(b'\x02')
             self.socket.readAll()
             self.is_connection_stopped_by_user = True
@@ -166,7 +166,7 @@ class BluetoothClient(QWidget):
     def requestDone(self):
         try:
             # TODO: fix 1st-received-error-byte bug.
-            # Notify the server to send sampling data.
+            # Notify the server to send the sampling data.
             self.socket.readAll()
             self.socket.write(b'\x01')
             self.ui.stateIndicator.setText('设备已就绪')
@@ -186,12 +186,12 @@ class BluetoothClient(QWidget):
     def readDeviceData(self):
         try:
             data_array = self.socket.read(1024)
-            # Check whether there're single byte remained in previous read;
-            # complete current received byte array with the sigle byte (if has).
+            # Check whether there are bytes remained in the previous reading.
+            # Complete current received byte array with those bytes (if have).
             if len(self.half_data_array) > 0:
                 data_array.push_front(self.half_data_array.data())
                 self.half_data_array.clear()
-            # Store the trailing single byte temporarily to handle in next read.
+            # Store the trailing bytes temporarily to handle in the next reading.
             if len(data_array) % 2 == 1:
                 # Use operator[] instead of at() here since the latter decodes utf-8.
                 self.half_data_array.append(data_array[len(data_array) - 1])
@@ -209,34 +209,31 @@ class VisualClient(QWidget):
 
     def __init__(self, comm_queue):
         super().__init__()
+
+        self.channel_index = 0
         self.comm_queue = comm_queue
+
         self.ui = loadUI('VisualClient.ui')
         self.setLayout(self.ui.signalGallery)
         self.resize(800, 800)
         self.setWindowTitle('表面肌电手势识别 - 可视化客户端')
 
-        self.ui.channel = self.makeChannelChart()
-        # Setup single channel for the time being.
-        self.ui.signalGallery.addWidget(self.ui.channel.t.chartView, 0, 0)
-        self.ui.signalGallery.addWidget(self.ui.channel.f.chartView, 1, 0)
+        self.ui.channel = [self.makeGeneralChart('通道 ' + str(i)) for i in range(1,5)]
+        # Support visualizing 4-channel data dynamically.
+        self.ui.signalGallery.addWidget(self.ui.channel[0].chartView, 0, 0)
+        self.ui.signalGallery.addWidget(self.ui.channel[1].chartView, 0, 1)
+        self.ui.signalGallery.addWidget(self.ui.channel[2].chartView, 1, 0)
+        self.ui.signalGallery.addWidget(self.ui.channel[3].chartView, 1, 1)
 
-        self.signal_amplitude_list = list()
+        self.signal_amplitude_list = [list() for i in range(0,4)]
 
         self.lk = RLock()
-        # Start an extral thread to peek communication queue.
+        # Start an extral thread to peek the communication queue.
         self.td = Thread(target=VisualClient.peekCommQueue, args=(self,))
         self.td.daemon = True
         self.td.start()
 
-    def makeChannelChart(self):
-        channel = types.SimpleNamespace()
-
-        channel.t = self.makeGeneralChart('时域', '时间', (0, 1000), 6, '幅度 / 伏特', (0, 3.3), 2)
-        channel.f = self.makeGeneralChart('频域', '频率', (-500, 500), 6, '幅度 / 绝对值', (0, 1000), 2)
-
-        return channel
-
-    def makeGeneralChart(self, title, xlabel, xrange, xtick, ylabel, yrange, ytick):
+    def makeGeneralChart(self, title):
         chart = types.SimpleNamespace()
 
         chart.series = QLineSeries()
@@ -246,15 +243,15 @@ class VisualClient(QWidget):
         chart.series.replace([QPointF(x, 0) for x in range(0, 1001)])
 
         chart.axisX = QValueAxis()
-        chart.axisX.setRange(*xrange)
-        chart.axisX.setTickCount(xtick)
-        chart.axisX.setTitleText(xlabel)
+        chart.axisX.setRange(0, 1000)
+        chart.axisX.setTickCount(6)
+        chart.axisX.setTitleText('时间')
         chart.axisX.setTitleFont(QFont('黑体', 16))
 
         chart.axisY = QValueAxis()
-        chart.axisY.setRange(*yrange)
-        chart.axisY.setTickCount(ytick)
-        chart.axisY.setTitleText(ylabel)
+        chart.axisY.setRange(0, 3.3)
+        chart.axisY.setTickCount(2)
+        chart.axisY.setTitleText('幅度 / 伏特')
         chart.axisY.setTitleFont(QFont('黑体', 16))
 
         chart.chart = QChart()
@@ -280,12 +277,13 @@ class VisualClient(QWidget):
             while True:
                 self.lk.acquire()
                 while not self.comm_queue.empty():
-                    # Throw if the queue blocks more than 1s.
+                    # Throw if the queue blocks more than 1 second.
                     data_array = self.comm_queue.get(True, 1)
                     # Convert 16-bit sampling values to referenced voltage values.
                     for i in range(0, len(data_array)):
                         data_array[i] = (data_array[i] / 65536) * 3.3
-                    self.signal_amplitude_list = self.signal_amplitude_list + data_array
+                        self.signal_amplitude_list[self.channel_index].append(data_array[i])
+                        self.channel_index = (self.channel_index + 1) % 4
                     # Notify to update the chart with new data.
                     self.data_received.emit()
                 self.lk.release()
@@ -297,40 +295,26 @@ class VisualClient(QWidget):
     def updateChart(self):
         try:
             self.lk.acquire()
-            self.updateTimeDomainChart()
-            self.updateFreqDomainChart()
+            for i in range(0, 4):
+                point_vec = self.ui.channel[i].series.pointsVector()
+                pvec_len = len(point_vec)
+                svec_len = len(self.signal_amplitude_list[i])
+                mvec_len = min(pvec_len, svec_len)
+                for j in range(0, mvec_len):
+                    data = self.signal_amplitude_list[i][svec_len - j - 1]
+                    point_vec[pvec_len - j - 1].setY(data)
+                # Use replace instead of clear & append to improve performance.
+                self.ui.channel[i].series.replace(point_vec)
             self.lk.release()
         except Exception as e:
             print(f'Exception in updateChart, {e}')
 
-    def updateTimeDomainChart(self):
-        point_vec = self.ui.channel.t.series.pointsVector()
-        pvec_len = len(point_vec)
-        svec_len = len(self.signal_amplitude_list)
-        mvec_len = min(pvec_len, svec_len)
-        for i in range(0, mvec_len):
-            data = self.signal_amplitude_list[svec_len - i - 1]
-            point_vec[pvec_len - i - 1].setY(data)
-        # Use replace instead of clear & append to improve performance.
-        self.ui.channel.t.series.replace(point_vec)
-
-    def updateFreqDomainChart(self):
-        point_vec = self.ui.channel.t.series.pointsVector()
-        t_domain = [p.y() for p in point_vec]
-        if len(t_domain) > 1000:
-            t_domain = t_domain[0:1000]
-        elif len(t_domain) < 1000:
-            t_domain = t_domain + [0] * (1000 - len(t_domain))
-        f_domain = abs(np.fft.fftshift(np.fft.fft(t_domain)))
-        point_vec = [QPointF(x-500, f_domain[x]) for x in range(0, 1000)]
-        # Use replace instead of clear & append to improve performance.
-        self.ui.channel.f.series.replace(point_vec)
-
     def saveData(self):
-        f = open('data.txt', 'w')
-        for elem in self.signal_amplitude_list:
-            f.write(str(elem) + '\n')
-        f.close()
+        for i in range(1, 5):
+            f = open('data' + str(i) + '.txt', 'w')
+            for elem in self.signal_amplitude_list[i]:
+                f.write(str(elem) + '\n')
+            f.close()
 
 
 def visualProcess(comm_queue):
@@ -346,10 +330,10 @@ if __name__ == '__main__':
     app = QApplication(sys.argv)
     comm_qs = dict()
     comm_qs['visual'] = Queue()
-    # Initialize bluetooth window.
+    # Initialize the bluetooth window.
     bt_clnt = BluetoothClient(comm_qs)
     bt_clnt.show()
-    # Create visual window process.
+    # Create the visual window process.
     vs_proc = Process(target=visualProcess, args=(comm_qs['visual'],))
     vs_proc.start()
     sys.exit(app.exec())

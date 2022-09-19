@@ -56,6 +56,15 @@ void InitUart(void);
 
 #define UART_IO_VALUE (UART0->D)
 
+// BLE
+
+#define SEND_CHANNEL_DATA(Channel) \
+    SELECT_ADC_INPUT(Channel); \
+    while (!UART_WRITABLE) ; \
+    UART_IO_VALUE = ADC_INPUT_VALUE & 0x0FF; \
+    while (!UART_WRITABLE) ; \
+    UART_IO_VALUE = (ADC_INPUT_VALUE >> 8) & 0x0FF;
+
 int main(void)
 {
     InitPit(0);
@@ -99,16 +108,11 @@ void PIT_IRQHandler(void)
         PIT->CHANNEL[0].TFLG &= PIT_TFLG_TIF_MASK;
         
         // User defined works.
-        SELECT_ADC_INPUT(1);
-        while (!UART_WRITABLE) ;
-        UART_IO_VALUE = ADC_INPUT_VALUE & 0x0FF;
-        while (!UART_WRITABLE) ;
-        UART_IO_VALUE = (ADC_INPUT_VALUE >> 8) & 0x0FF;
+        SEND_CHANNEL_DATA(1);
+        SEND_CHANNEL_DATA(2);
+        SEND_CHANNEL_DATA(3);
+        SEND_CHANNEL_DATA(4);
     }
-//  else if (PIT->CHANNEL[1].TFLG & PIT_TFLG_TIF_MASK)
-//  {
-//      PIT->CHANNEL[1].TFLG &= PIT_TFLG_TIF_MASK;
-//  }
 }
 
 void InitPit(int channel)
