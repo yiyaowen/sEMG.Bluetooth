@@ -310,8 +310,8 @@ class VisualClient(QWidget):
             print(f'Exception in updateChart, {e}')
 
     def saveData(self):
-        for i in range(1, 5):
-            f = open('data' + str(i) + '.txt', 'w')
+        for i in range(0, 4):
+            f = open('data' + str(i + 1) + '.txt', 'w')
             for elem in self.signal_amplitude_list[i]:
                 f.write(str(elem) + '\n')
             f.close()
