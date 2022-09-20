@@ -2,7 +2,7 @@
 *.scvd
 *.uvguix.*
 
-Client/data*.txt
+Client/export
 
 Server/Listings
 Server/Objects

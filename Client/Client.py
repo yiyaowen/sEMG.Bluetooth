@@ -1,9 +1,12 @@
 from multiprocessing import Process, Queue
+import os
 import sys
 import struct
 from threading import Thread, RLock
 import time
 import types
+
+import numpy as np
 
 from PySide6.QtCore import QByteArray, QFile, QIODevice, QPointF, Signal, Slot
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
@@ -52,18 +55,15 @@ class BluetoothClient(QWidget):
         self.resize(600, 200)
         self.setWindowTitle('表面肌电手势识别 - 蓝牙客户端')
 
-        # Initialize basic bluetooth components.
-        self.local_device = QBluetoothLocalDevice()
-        self.device_agent = QBluetoothDeviceDiscoveryAgent()
-        self.service_agent = QBluetoothServiceDiscoveryAgent()
-
-        # Connect signals & slots.
-        # UI
         self.ui.startButton.clicked.connect(self.startConnection)
         self.ui.stopButton.clicked.connect(self.stopConnection)
         self.ui.deviceList.currentTextChanged.connect(self.startConnection)
         self.ui.serviceList.currentIndexChanged.connect(self.requestService)
-        # Bluetooth
+        
+        self.local_device = QBluetoothLocalDevice()
+        self.device_agent = QBluetoothDeviceDiscoveryAgent()
+        self.service_agent = QBluetoothServiceDiscoveryAgent()
+
         self.device_agent.deviceDiscovered.connect(self.addDevice)
         self.local_device.pairingFinished.connect(self.pairingDone)
         self.service_agent.serviceDiscovered.connect(self.addService)
@@ -83,12 +83,14 @@ class BluetoothClient(QWidget):
 
         self.device_agent.start()
 
-    def __del__(self):
-        super().__del__()
-        # TODO: fix 1st-received-error-byte bug.
-        # Notify the server to stop the sampling.
-        self.socket.write(b'\x02')
-        self.socket.readAll()
+    def closeEvent(self, _):
+        try:
+            # Notify the server to stop sampling.
+            self.socket.write(b'\x02')
+            self.socket.readAll()
+        except Exception as _:
+            pass
+        os._exit(0) # Use this to terminate all threads.
 
     @Slot(QBluetoothDeviceInfo)
     def addDevice(self, info):
@@ -113,8 +115,7 @@ class BluetoothClient(QWidget):
     @Slot()
     def stopConnection(self):
         try:
-            # TODO: fix 1st-received-error-byte bug.
-            # Notify the server to stop the sampling.
+            # Notify the server to stop sampling.
             self.socket.write(b'\x02')
             self.socket.readAll()
             self.is_connection_stopped_by_user = True
@@ -165,8 +166,7 @@ class BluetoothClient(QWidget):
     @Slot()
     def requestDone(self):
         try:
-            # TODO: fix 1st-received-error-byte bug.
-            # Notify the server to send the sampling data.
+            # Notify the server to start sampling.
             self.socket.readAll()
             self.socket.write(b'\x01')
             self.ui.stateIndicator.setText('设备已就绪')
@@ -207,31 +207,45 @@ class BluetoothClient(QWidget):
 
 class VisualClient(QWidget):
 
-    def __init__(self, comm_queue):
+    def __init__(self, comm_queue, notify_queue, callback_queue):
         super().__init__()
 
         self.channel_index = 0
         self.comm_queue = comm_queue
+        self.notify_queue = notify_queue
+        self.callback_queue = callback_queue
 
         self.ui = loadUI('VisualClient.ui')
-        self.setLayout(self.ui.signalGallery)
-        self.resize(800, 800)
+        self.setLayout(self.ui.mainLayout)
+        self.resize(800, 600)
         self.setWindowTitle('表面肌电手势识别 - 可视化客户端')
 
-        self.ui.channel = [self.makeGeneralChart('通道 ' + str(i)) for i in range(1,5)]
+        self.ui.channel = [self.makeGeneralChart('通道 ' + str(i)) for i in range(1, 5)]
         # Support visualizing 4-channel data dynamically.
         self.ui.signalGallery.addWidget(self.ui.channel[0].chartView, 0, 0)
         self.ui.signalGallery.addWidget(self.ui.channel[1].chartView, 0, 1)
         self.ui.signalGallery.addWidget(self.ui.channel[2].chartView, 1, 0)
         self.ui.signalGallery.addWidget(self.ui.channel[3].chartView, 1, 1)
 
-        self.signal_amplitude_list = [list() for i in range(0,4)]
+        self.ui.startButton.clicked.connect(self.startCollect)
+        self.ui.stopButton.clicked.connect(self.stopCollect)
+
+        self.signal_amplitude_list = [list() for i in range(0, 4)]
 
         self.lk = RLock()
-        # Start an extral thread to peek the communication queue.
-        self.td = Thread(target=VisualClient.peekCommQueue, args=(self,))
-        self.td.daemon = True
-        self.td.start()
+
+        self.td1 = Thread(target=VisualClient.peekCommQueue, args=(self,))
+        self.td1.daemon = True
+        self.td1.start()
+
+        self.td2 = Thread(target=VisualClient.peekCallbackQueue, args=(self,))
+        self.td2.daemon = True
+        self.td2.start()
+
+    def closeEvent(self, _):
+        self.exportCompleteData()
+        self.notify_queue.put('CLOSE')
+        os._exit(0) # Use this to terminate all threads.
 
     def makeGeneralChart(self, title):
         chart = types.SimpleNamespace()
@@ -246,13 +260,13 @@ class VisualClient(QWidget):
         chart.axisX.setRange(0, 1000)
         chart.axisX.setTickCount(6)
         chart.axisX.setTitleText('时间')
-        chart.axisX.setTitleFont(QFont('黑体', 16))
+        chart.axisX.setTitleFont(QFont('微软雅黑', 9))
 
         chart.axisY = QValueAxis()
         chart.axisY.setRange(0, 3.3)
         chart.axisY.setTickCount(2)
         chart.axisY.setTitleText('幅度 / 伏特')
-        chart.axisY.setTitleFont(QFont('黑体', 16))
+        chart.axisY.setTitleFont(QFont('微软雅黑', 9))
 
         chart.chart = QChart()
         chart.chart.setTitle(title)
@@ -268,6 +282,39 @@ class VisualClient(QWidget):
         chart.chartView.setRenderHint(QPainter.Antialiasing)
 
         return chart
+
+    @Slot()
+    def startCollect(self):
+        self.ui.startButton.setEnabled(False)
+        self.ui.stopButton.setEnabled(True)
+        self.ui.infoLabel.setText('XXX')
+        self.ui.statusLabel.setText('正在收集......')
+        self.collect_start = [len(self.signal_amplitude_list[i]) for i in range(0, 4)]
+
+    @Slot()
+    def stopCollect(self):
+        self.ui.stopButton.setEnabled(False)
+        info_text = str()
+        for i in range(0, 4):
+            if i != 0:
+                info_text = info_text + ', '
+            info_text = info_text + '通道 ' + str(i + 1) + ' ( '
+            info_text = info_text + str(len(self.signal_amplitude_list[i])) + ' 点 )'
+        self.ui.infoLabel.setText(info_text)
+        self.ui.statusLabel.setText('等待处理......')
+        self.collect_stop = [len(self.signal_amplitude_list[i]) for i in range(0, 4)]
+        self.exportSliceData()
+        # Notify the recognition client to start analyzing signal data.
+        self.notify_queue.put('START')
+
+    def exportSliceData(self):
+        if not os.path.exists('export/slices'):
+            os.makedirs('export/slices')
+        for i in range(0, 4):
+            signal_len = len(self.signal_amplitude_list[i])
+            a = min(self.collect_start[i], signal_len - 1)
+            b = max(min(self.collect_stop[i], signal_len), a + 1)
+            np.save('export/slices/data' + str(i + 1) + '.npy', self.signal_amplitude_list[i][a:b])
 
     data_received = Signal()
 
@@ -287,11 +334,12 @@ class VisualClient(QWidget):
                     # Notify to update the chart with new data.
                     self.data_received.emit()
                 self.lk.release()
-                # Prevnet UI thread from getting stuck.
+                # Prevnet the UI thread from getting stuck.
                 time.sleep(0.01)
         except Exception as e:
             print(f'Exception in peekCommQueue, {e}')
 
+    @Slot()
     def updateChart(self):
         try:
             self.lk.acquire()
@@ -309,31 +357,109 @@ class VisualClient(QWidget):
         except Exception as e:
             print(f'Exception in updateChart, {e}')
 
-    def saveData(self):
+    result_received = Signal(str)
+
+    def peekCallbackQueue(self):
+        try:
+            self.result_received.connect(self.updateResult)
+            while True:
+                self.lk.acquire()
+                while not self.callback_queue.empty():
+                    # Throw if the queue blocks more than 1 second.
+                    result_text = self.callback_queue.get(True, 1)
+                    # Notify to update the label with new result.
+                    self.result_received.emit(result_text)
+                self.lk.release()
+                # Prevnet the UI thread from getting stuck.
+                time.sleep(0.01)
+        except Exception as e:
+            print(f'Exception in peekCallbackQueue, {e}')  
+
+    @Slot(str)
+    def updateResult(self, result_text):
+        self.ui.startButton.setEnabled(True)
+        self.ui.resultLabel.setText(result_text)
+        self.ui.statusLabel.setText('处理完成')
+
+    def exportCompleteData(self):
+        if not os.path.exists('export/complete'):
+            os.makedirs('export/complete')
         for i in range(0, 4):
-            f = open('data' + str(i + 1) + '.txt', 'w')
+            f = open('export/complete/data' + str(i + 1) + '.txt', 'w')
             for elem in self.signal_amplitude_list[i]:
                 f.write(str(elem) + '\n')
             f.close()
 
 
-def visualProcess(comm_queue):
+def visualProcess(comm_queue, notify_queue, callback_queue):
     app = QApplication(sys.argv)
-    vs_clnt = VisualClient(comm_queue)
+    vs_clnt = VisualClient(comm_queue, notify_queue, callback_queue)
     vs_clnt.show()
-    rcode = app.exec()
-    vs_clnt.saveData()
-    sys.exit(rcode)
+    sys.exit(app.exec())
+
+
+class RecognitionClient(QWidget):
+
+    def __init__(self, notify_queue, callback_queue):
+        super().__init__()
+
+        self.notify_queue = notify_queue
+        self.callback_queue = callback_queue
+
+        self.lk = RLock()
+
+        self.td = Thread(target=RecognitionClient.peekNotifyQueue, args=(self,))
+        self.td.daemon = True
+        self.td.start()
+
+    def peekNotifyQueue(self):
+        try:
+            while True:
+                self.lk.acquire()
+                while not self.notify_queue.empty():
+                    msg_text = self.notify_queue.get(True, 1)
+                    if msg_text == 'START':
+                        self.callback_queue.put(self.analyzeSignalData())
+                    elif msg_text == 'CLOSE':
+                        os._exit(0) # Use this to terminate all threads.
+                self.lk.release()
+                # Prevent the main thread from getting stuck.
+                time.sleep(0.01)
+        except Exception as e:
+            print(f'Exception in peekNotifyQueue, {e}')
+
+    def analyzeSignalData(self):
+        # TODO: Add recognition codes ('export/slices/data*.npy', *=1,2,3,4).
+        time.sleep(3)
+        return '点赞'
+    
+
+def recognitionProcess(notify_queue, callback_queue):
+    app = QApplication(sys.argv)
+    rg_clnt = RecognitionClient(notify_queue, callback_queue)
+    rg_clnt.hide()
+    sys.exit(app.exec())
 
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
+
     comm_qs = dict()
     comm_qs['visual'] = Queue()
-    # Initialize the bluetooth window.
+
+    # Bluetooth Client
     bt_clnt = BluetoothClient(comm_qs)
     bt_clnt.show()
-    # Create the visual window process.
-    vs_proc = Process(target=visualProcess, args=(comm_qs['visual'],))
+
+    ntfy_q = Queue()
+    clbk_q = Queue()
+
+    # Visual Client
+    vs_proc = Process(target=visualProcess, args=(comm_qs['visual'],ntfy_q,clbk_q,))
     vs_proc.start()
+
+    # Recognition Client
+    rg_proc = Process(target=recognitionProcess, args=(ntfy_q,clbk_q,))
+    rg_proc.start()
+
     sys.exit(app.exec())
