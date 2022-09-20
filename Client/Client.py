@@ -1,3 +1,4 @@
+from datetime import datetime
 from multiprocessing import Process, Queue
 import os
 import sys
@@ -210,6 +211,9 @@ class VisualClient(QWidget):
     def __init__(self, comm_queue, notify_queue, callback_queue):
         super().__init__()
 
+        self.dtnow = datetime.now()
+        self.dtnowstr = self.dtnow.strftime('%Y-%m-%d-%H-%M-%S')
+
         self.channel_index = 0
         self.comm_queue = comm_queue
         self.notify_queue = notify_queue
@@ -285,36 +289,47 @@ class VisualClient(QWidget):
 
     @Slot()
     def startCollect(self):
+        self.collect_start = [len(self.signal_amplitude_list[i]) for i in range(0, 4)]
         self.ui.startButton.setEnabled(False)
         self.ui.stopButton.setEnabled(True)
         self.ui.infoLabel.setText('XXX')
         self.ui.statusLabel.setText('正在收集......')
-        self.collect_start = [len(self.signal_amplitude_list[i]) for i in range(0, 4)]
 
     @Slot()
     def stopCollect(self):
+        self.collect_stop = [len(self.signal_amplitude_list[i]) for i in range(0, 4)]
         self.ui.stopButton.setEnabled(False)
         info_text = str()
         for i in range(0, 4):
             if i != 0:
                 info_text = info_text + ', '
             info_text = info_text + '通道 ' + str(i + 1) + ' ( '
-            info_text = info_text + str(len(self.signal_amplitude_list[i])) + ' 点 )'
+            info_text = info_text + str(self.collect_stop[i] - self.collect_start[i]) + ' 点 )'
         self.ui.infoLabel.setText(info_text)
         self.ui.statusLabel.setText('等待处理......')
-        self.collect_stop = [len(self.signal_amplitude_list[i]) for i in range(0, 4)]
         self.exportSliceData()
         # Notify the recognition client to start analyzing signal data.
         self.notify_queue.put('START')
 
+    slice_index = 0
+
     def exportSliceData(self):
-        if not os.path.exists('export/slices'):
-            os.makedirs('export/slices')
+        self.slice_index = self.slice_index + 1
         for i in range(0, 4):
             signal_len = len(self.signal_amplitude_list[i])
             a = min(self.collect_start[i], signal_len - 1)
             b = max(min(self.collect_stop[i], signal_len), a + 1)
-            np.save('export/slices/data' + str(i + 1) + '.npy', self.signal_amplitude_list[i][a:b])
+            src_data = self.signal_amplitude_list[i][a:b]
+            # Append 4-channel offline signal data.
+            offline_dir = 'export/slices/' + self.dtnowstr + '/channel' + str(i + 1)
+            if not os.path.exists(offline_dir):
+                os.makedirs(offline_dir)
+            np.save(offline_dir + '/data' + str(self.slice_index) + '.npy', src_data)
+            # Overwrite 4-channel runtime signal data.
+            runtime_dir = 'export/runtime'
+            if not os.path.exists(runtime_dir):
+                os.mkdir(runtime_dir)
+            np.save(runtime_dir + '/channel' + str(i + 1) + '.npy', src_data)
 
     data_received = Signal()
 
@@ -382,10 +397,11 @@ class VisualClient(QWidget):
         self.ui.statusLabel.setText('处理完成')
 
     def exportCompleteData(self):
-        if not os.path.exists('export/complete'):
-            os.makedirs('export/complete')
+        complete_dir = 'export/complete/' + self.dtnowstr
+        if not os.path.exists(complete_dir):
+            os.makedirs(complete_dir)
         for i in range(0, 4):
-            f = open('export/complete/data' + str(i + 1) + '.txt', 'w')
+            f = open(complete_dir + '/channel' + str(i + 1) + '.txt', 'w')
             for elem in self.signal_amplitude_list[i]:
                 f.write(str(elem) + '\n')
             f.close()
