@@ -211,9 +211,6 @@ class VisualClient(QWidget):
     def __init__(self, comm_queue, notify_queue, callback_queue):
         super().__init__()
 
-        self.dtnow = datetime.now()
-        self.dtnowstr = self.dtnow.strftime('%Y-%m-%d-%H-%M-%S')
-
         self.channel_index = 0
         self.comm_queue = comm_queue
         self.notify_queue = notify_queue
@@ -224,17 +221,19 @@ class VisualClient(QWidget):
         self.resize(800, 600)
         self.setWindowTitle('表面肌电手势识别 - 可视化客户端')
 
-        self.ui.channel = [self.makeGeneralChart('通道 ' + str(i)) for i in range(1, 5)]
-        # Support visualizing 4-channel data dynamically.
-        self.ui.signalGallery.addWidget(self.ui.channel[0].chartView, 0, 0)
-        self.ui.signalGallery.addWidget(self.ui.channel[1].chartView, 0, 1)
-        self.ui.signalGallery.addWidget(self.ui.channel[2].chartView, 1, 0)
-        self.ui.signalGallery.addWidget(self.ui.channel[3].chartView, 1, 1)
+        self.ui.channel = types.SimpleNamespace()
+        self.ui.channel.t = [self.makeTimeDomainChart('通道 ' + str(i)) for i in range(1, 3)]
+        self.ui.channel.f = [self.makeFreqDomainChart('通道 ' + str(i)) for i in range(1, 3)]
+        # Support visualizing 2-channel data dynamically.
+        self.ui.signalGallery.addWidget(self.ui.channel.t[0].chartView, 0, 0)
+        self.ui.signalGallery.addWidget(self.ui.channel.t[1].chartView, 0, 1)
+        self.ui.signalGallery.addWidget(self.ui.channel.f[0].chartView, 1, 0)
+        self.ui.signalGallery.addWidget(self.ui.channel.f[1].chartView, 1, 1)
 
         self.ui.startButton.clicked.connect(self.startCollect)
         self.ui.stopButton.clicked.connect(self.stopCollect)
 
-        self.signal_amplitude_list = [list() for i in range(0, 4)]
+        self.signal_amplitude_list = [list() for i in range(0, 2)]
 
         self.lk = RLock()
 
@@ -251,7 +250,16 @@ class VisualClient(QWidget):
         self.notify_queue.put('CLOSE')
         os._exit(0) # Use this to terminate all threads.
 
-    def makeGeneralChart(self, title):
+    def dateTimeNowStr(self):
+        return datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
+
+    def makeTimeDomainChart(self, title):
+        return self.makeGeneralChart(title, '时间', (0, 1000), 6, '幅度 / 伏特', (0, 3.3), 2)
+
+    def makeFreqDomainChart(self, title):
+        return self.makeGeneralChart(title, '频率', (-500, 500), 6, '幅度 / 绝对值', (0, 1000), 2)
+
+    def makeGeneralChart(self, title, xlabel, xrange, xtick, ylabel, yrange, ytick):
         chart = types.SimpleNamespace()
 
         chart.series = QLineSeries()
@@ -261,15 +269,15 @@ class VisualClient(QWidget):
         chart.series.replace([QPointF(x, 0) for x in range(0, 1001)])
 
         chart.axisX = QValueAxis()
-        chart.axisX.setRange(0, 1000)
-        chart.axisX.setTickCount(6)
-        chart.axisX.setTitleText('时间')
+        chart.axisX.setRange(*xrange)
+        chart.axisX.setTickCount(xtick)
+        chart.axisX.setTitleText(xlabel)
         chart.axisX.setTitleFont(QFont('微软雅黑', 9))
 
         chart.axisY = QValueAxis()
-        chart.axisY.setRange(0, 3.3)
-        chart.axisY.setTickCount(2)
-        chart.axisY.setTitleText('幅度 / 伏特')
+        chart.axisY.setRange(*yrange)
+        chart.axisY.setTickCount(ytick)
+        chart.axisY.setTitleText(ylabel)
         chart.axisY.setTitleFont(QFont('微软雅黑', 9))
 
         chart.chart = QChart()
@@ -289,7 +297,7 @@ class VisualClient(QWidget):
 
     @Slot()
     def startCollect(self):
-        self.collect_start = [len(self.signal_amplitude_list[i]) for i in range(0, 4)]
+        self.collect_start = [len(self.signal_amplitude_list[i]) for i in range(0, 2)]
         self.ui.startButton.setEnabled(False)
         self.ui.stopButton.setEnabled(True)
         self.ui.infoLabel.setText('XXX')
@@ -297,10 +305,10 @@ class VisualClient(QWidget):
 
     @Slot()
     def stopCollect(self):
-        self.collect_stop = [len(self.signal_amplitude_list[i]) for i in range(0, 4)]
+        self.collect_stop = [len(self.signal_amplitude_list[i]) for i in range(0, 2)]
         self.ui.stopButton.setEnabled(False)
         info_text = str()
-        for i in range(0, 4):
+        for i in range(0, 2):
             if i != 0:
                 info_text = info_text + ', '
             info_text = info_text + '通道 ' + str(i + 1) + ' ( '
@@ -311,21 +319,18 @@ class VisualClient(QWidget):
         # Notify the recognition client to start analyzing signal data.
         self.notify_queue.put('START')
 
-    slice_index = 0
-
     def exportSliceData(self):
-        self.slice_index = self.slice_index + 1
-        for i in range(0, 4):
+        for i in range(0, 2):
             signal_len = len(self.signal_amplitude_list[i])
             a = min(self.collect_start[i], signal_len - 1)
             b = max(min(self.collect_stop[i], signal_len), a + 1)
             src_data = self.signal_amplitude_list[i][a:b]
-            # Append 4-channel offline signal data.
-            offline_dir = 'export/slices/' + self.dtnowstr + '/channel' + str(i + 1)
+            # Append 2-channel offline signal data.
+            offline_dir = 'export/slices/' + self.dateTimeNowStr()
             if not os.path.exists(offline_dir):
                 os.makedirs(offline_dir)
-            np.save(offline_dir + '/data' + str(self.slice_index) + '.npy', src_data)
-            # Overwrite 4-channel runtime signal data.
+            np.save(offline_dir + '/channel' + str(i + 1) + '.npy', src_data)
+            # Overwrite 2-channel runtime signal data.
             runtime_dir = 'export/runtime'
             if not os.path.exists(runtime_dir):
                 os.mkdir(runtime_dir)
@@ -345,7 +350,7 @@ class VisualClient(QWidget):
                     for i in range(0, len(data_array)):
                         data_array[i] = (data_array[i] / 65536) * 3.3
                         self.signal_amplitude_list[self.channel_index].append(data_array[i])
-                        self.channel_index = (self.channel_index + 1) % 4
+                        self.channel_index = (self.channel_index + 1) % 2
                     # Notify to update the chart with new data.
                     self.data_received.emit()
                 self.lk.release()
@@ -358,19 +363,36 @@ class VisualClient(QWidget):
     def updateChart(self):
         try:
             self.lk.acquire()
-            for i in range(0, 4):
-                point_vec = self.ui.channel[i].series.pointsVector()
-                pvec_len = len(point_vec)
-                svec_len = len(self.signal_amplitude_list[i])
-                mvec_len = min(pvec_len, svec_len)
-                for j in range(0, mvec_len):
-                    data = self.signal_amplitude_list[i][svec_len - j - 1]
-                    point_vec[pvec_len - j - 1].setY(data)
-                # Use replace instead of clear & append to improve performance.
-                self.ui.channel[i].series.replace(point_vec)
+            self.updateTimeDomainChart()
+            self.updateFreqDomainChart()
             self.lk.release()
         except Exception as e:
             print(f'Exception in updateChart, {e}')
+
+    def updateTimeDomainChart(self):
+        for i in range(0, 2):
+            point_vec = self.ui.channel.t[i].series.pointsVector()
+            pvec_len = len(point_vec)
+            svec_len = len(self.signal_amplitude_list[i])
+            mvec_len = min(pvec_len, svec_len)
+            for j in range(0, mvec_len):
+                data = self.signal_amplitude_list[i][svec_len - j - 1]
+                point_vec[pvec_len - j - 1].setY(data)
+            # Use replace instead of clear & append to improve performance.
+            self.ui.channel.t[i].series.replace(point_vec)
+
+    def updateFreqDomainChart(self):
+        for i in range(0, 2):
+            point_vec = self.ui.channel.t[i].series.pointsVector()
+            t_domain = [p.y() for p in point_vec]
+            if len(t_domain) > 1000:
+                t_domain = t_domain[0:1000]
+            elif len(t_domain) < 1000:
+                t_domain = t_domain + [0] * (1000 - len(t_domain))
+            f_domain = abs(np.fft.fftshift(np.fft.fft(t_domain)))
+            point_vec = [QPointF(x - 500, f_domain[x]) for x in range(0, 1000)]
+            # Use replace instead of clear & append to improve performance.
+            self.ui.channel.f[i].series.replace(point_vec)
 
     result_received = Signal(str)
 
@@ -397,10 +419,10 @@ class VisualClient(QWidget):
         self.ui.statusLabel.setText('处理完成')
 
     def exportCompleteData(self):
-        complete_dir = 'export/complete/' + self.dtnowstr
+        complete_dir = 'export/complete/' + self.dateTimeNowStr()
         if not os.path.exists(complete_dir):
             os.makedirs(complete_dir)
-        for i in range(0, 4):
+        for i in range(0, 2):
             f = open(complete_dir + '/channel' + str(i + 1) + '.txt', 'w')
             for elem in self.signal_amplitude_list[i]:
                 f.write(str(elem) + '\n')
@@ -445,7 +467,7 @@ class RecognitionClient(QWidget):
             print(f'Exception in peekNotifyQueue, {e}')
 
     def analyzeSignalData(self):
-        # TODO: Add recognition codes ('export/slices/data*.npy', *=1,2,3,4).
+        # TODO: Add recognition codes ('export/runtime/channel*.npy', *=1,2).
         time.sleep(3)
         return '点赞'
     
