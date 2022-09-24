@@ -110,8 +110,6 @@ void PIT_IRQHandler(void)
         // User defined works.
         SEND_CHANNEL_DATA(1);
         SEND_CHANNEL_DATA(2);
-        SEND_CHANNEL_DATA(3);
-        SEND_CHANNEL_DATA(4);
     }
 }
 
