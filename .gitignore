@@ -1,8 +1,10 @@
-*.user
 *.scvd
+*.user
 *.uvguix.*
 
 Client/export
+Client/model
+Client/__pycache__
 
 Server/Listings
 Server/Objects

@@ -66,7 +66,7 @@
       <item>
        <widget class="QLabel" name="statusLabel">
         <property name="text">
-         <string>处理完成</string>
+         <string>实时处理</string>
         </property>
         <property name="alignment">
          <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>

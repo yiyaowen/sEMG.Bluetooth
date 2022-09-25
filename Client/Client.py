@@ -29,6 +29,8 @@ from PySide6.QtBluetooth import \
     QBluetoothServiceDiscoveryAgent, \
     QBluetoothServiceInfo
 
+import design
+
 
 def loadUI(ui_file_name):
     ui_file = QFile(ui_file_name)
@@ -297,16 +299,14 @@ class VisualClient(QWidget):
 
     @Slot()
     def startCollect(self):
-        self.collect_start = [len(self.signal_amplitude_list[i]) for i in range(0, 2)]
         self.ui.startButton.setEnabled(False)
         self.ui.stopButton.setEnabled(True)
-        self.ui.infoLabel.setText('XXX')
-        self.ui.statusLabel.setText('正在收集......')
+        self.collect_start = [len(self.signal_amplitude_list[i]) for i in range(0, 2)]
+        self.ui.infoLabel.setText('正在收集......')
 
     @Slot()
     def stopCollect(self):
         self.collect_stop = [len(self.signal_amplitude_list[i]) for i in range(0, 2)]
-        self.ui.stopButton.setEnabled(False)
         info_text = str()
         for i in range(0, 2):
             if i != 0:
@@ -314,10 +314,9 @@ class VisualClient(QWidget):
             info_text = info_text + '通道 ' + str(i + 1) + ' ( '
             info_text = info_text + str(self.collect_stop[i] - self.collect_start[i]) + ' 点 )'
         self.ui.infoLabel.setText(info_text)
-        self.ui.statusLabel.setText('等待处理......')
         self.exportSliceData()
-        # Notify the recognition client to start analyzing signal data.
-        self.notify_queue.put('START')
+        self.ui.startButton.setEnabled(True)
+        self.ui.stopButton.setEnabled(False)
 
     def exportSliceData(self):
         for i in range(0, 2):
@@ -416,7 +415,6 @@ class VisualClient(QWidget):
     def updateResult(self, result_text):
         self.ui.startButton.setEnabled(True)
         self.ui.resultLabel.setText(result_text)
-        self.ui.statusLabel.setText('处理完成')
 
     def exportCompleteData(self):
         complete_dir = 'export/complete/' + self.dateTimeNowStr()
@@ -438,17 +436,49 @@ def visualProcess(comm_queue, notify_queue, callback_queue):
 
 class RecognitionClient(QWidget):
 
-    def __init__(self, notify_queue, callback_queue):
+    def __init__(self, comm_queue, notify_queue, callback_queue):
         super().__init__()
 
+        self.channel_index = 0
+        self.comm_queue = comm_queue
         self.notify_queue = notify_queue
         self.callback_queue = callback_queue
+        self.design = design.design('model/1s_model.pkl')
+
+        self.signal_amplitude_list = [list() for i in range(0, 2)]
 
         self.lk = RLock()
 
-        self.td = Thread(target=RecognitionClient.peekNotifyQueue, args=(self,))
-        self.td.daemon = True
-        self.td.start()
+        self.td1 = Thread(target=RecognitionClient.peekCommQueue, args=(self,))
+        self.td1.daemon = True
+        self.td1.start()
+
+        self.td2 = Thread(target=RecognitionClient.peekNotifyQueue, args=(self,))
+        self.td2.daemon = True
+        self.td2.start()
+
+    data_received = Signal()
+
+    def peekCommQueue(self):
+        try:
+            self.data_received.connect(self.analyzeSignalData)
+            while True:
+                self.lk.acquire()
+                while not self.comm_queue.empty():
+                    # Throw if the queue blocks more than 1 second.
+                    data_array = self.comm_queue.get(True, 1)
+                    # Convert 16-bit sampling values to referenced voltage values.
+                    for i in range(0, len(data_array)):
+                        data_array[i] = (data_array[i] / 65536) * 3.3
+                        self.signal_amplitude_list[self.channel_index].append(data_array[i])
+                        self.channel_index = (self.channel_index + 1) % 2
+                    # Notify to update the chart with new data.
+                    self.data_received.emit()
+                self.lk.release()
+                # Prevnet the UI thread from getting stuck.
+                time.sleep(0.01)
+        except Exception as e:
+            print(f'Exception in peekCommQueue, {e}')
 
     def peekNotifyQueue(self):
         try:
@@ -456,9 +486,7 @@ class RecognitionClient(QWidget):
                 self.lk.acquire()
                 while not self.notify_queue.empty():
                     msg_text = self.notify_queue.get(True, 1)
-                    if msg_text == 'START':
-                        self.callback_queue.put(self.analyzeSignalData())
-                    elif msg_text == 'CLOSE':
+                    if msg_text == 'CLOSE':
                         os._exit(0) # Use this to terminate all threads.
                 self.lk.release()
                 # Prevent the main thread from getting stuck.
@@ -466,15 +494,57 @@ class RecognitionClient(QWidget):
         except Exception as e:
             print(f'Exception in peekNotifyQueue, {e}')
 
-    def analyzeSignalData(self):
-        # TODO: Add recognition codes ('export/runtime/channel*.npy', *=1,2).
-        time.sleep(3)
-        return '点赞'
-    
+    # last_signal_index = 1000
+    # last_signal_name = '静息'
 
-def recognitionProcess(notify_queue, callback_queue):
+    # prev_signal_names = ['静息' for i in range(0,4)]
+
+    def analyzeSignalData(self):
+        datasize = min(len(self.signal_amplitude_list[0]), len(self.signal_amplitude_list[1]))
+
+        # Continuous Check
+        if datasize > 1000:
+            data1 = self.signal_amplitude_list[0][-1000:]
+            data2 = self.signal_amplitude_list[1][-1000:]
+            data_array = np.vstack((data1, data2))
+            self.callback_queue.put(self.design.func(data_array))
+
+        # Double Check
+        # if datasize - self.last_signal_index > 200:
+        #     self.last_signal_index = datasize
+        #     data1 = self.signal_amplitude_list[0][-1000:]
+        #     data2 = self.signal_amplitude_list[1][-1000:]
+        #     data_array = np.vstack((data1, data2))
+        #     curr_signal_name = self.design.func(data_array)
+        #     if curr_signal_name == self.last_signal_name:
+        #         self.callback_queue.put(curr_signal_name)
+        #     self.last_signal_name = curr_signal_name
+
+        # Multi Check
+        # if datasize > 1000:
+        #     data1 = self.signal_amplitude_list[0][-1000:]
+        #     data2 = self.signal_amplitude_list[1][-1000:]
+        #     data_array = np.vstack((data1, data2))
+        #     self.prev_signal_names.append(self.design.func(data_array))
+        #     self.prev_signal_names.pop(0)
+        #     # Find max count name.
+        #     name_count_dict = dict()
+        #     for name in self.prev_signal_names:
+        #         if name in name_count_dict:
+        #             name_count_dict[name] = name_count_dict[name] + 1
+        #         else:
+        #             name_count_dict[name] = 1
+        #     max_count = 0
+        #     max_count_name = str()
+        #     for name, count in name_count_dict.items():
+        #         if count > max_count:
+        #             max_count = count
+        #             max_count_name = name
+        #     self.callback_queue.put(max_count_name)
+
+def recognitionProcess(comm_queue, notify_queue, callback_queue):
     app = QApplication(sys.argv)
-    rg_clnt = RecognitionClient(notify_queue, callback_queue)
+    rg_clnt = RecognitionClient(comm_queue, notify_queue, callback_queue)
     rg_clnt.hide()
     sys.exit(app.exec())
 
@@ -484,6 +554,7 @@ if __name__ == '__main__':
 
     comm_qs = dict()
     comm_qs['visual'] = Queue()
+    comm_qs['recognition'] = Queue()
 
     # Bluetooth Client
     bt_clnt = BluetoothClient(comm_qs)
@@ -497,7 +568,7 @@ if __name__ == '__main__':
     vs_proc.start()
 
     # Recognition Client
-    rg_proc = Process(target=recognitionProcess, args=(ntfy_q,clbk_q,))
+    rg_proc = Process(target=recognitionProcess, args=(comm_qs['recognition'],ntfy_q,clbk_q,))
     rg_proc.start()
 
     sys.exit(app.exec())
