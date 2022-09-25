@@ -443,7 +443,7 @@ class RecognitionClient(QWidget):
         self.comm_queue = comm_queue
         self.notify_queue = notify_queue
         self.callback_queue = callback_queue
-        self.design = design.design('model/1s_model.pkl')
+        self.design = design.design('models/1s_model.pkl')
 
         self.signal_amplitude_list = [list() for i in range(0, 2)]
 

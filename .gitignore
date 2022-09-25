@@ -2,9 +2,9 @@
 *.user
 *.uvguix.*
 
-Client/export
-Client/model
 Client/__pycache__
+Client/export
+Client/models
 
 Server/Listings
 Server/Objects
